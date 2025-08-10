@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Family Hub</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#2563eb" />
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <link rel="icon" href="icon-192.png">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css">
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Inter, 'Helvetica Neue', Arial, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol'; background:#f6f7f9; }
+    .card { background: #fff; border-radius: 0.9rem; padding: 1rem; box-shadow: 0 6px 24px rgba(0,0,0,.06); }
+    .badge { border-radius: 9999px; padding: 0.15rem 0.55rem; font-size: .75rem; font-weight: 600; }
+    .badge-cj   { background:#dbeafe; color:#1e40af; }  /* blue */
+    .badge-bri  { background:#fce7f3; color:#9d174d; }  /* pink */
+    .badge-both { background:#ede9fe; color:#5b21b6; }  /* purple */
+    .ghost-btn { background: transparent; border-radius:.65rem; padding:.4rem .65rem; }
+    .ghost-btn:hover { background:#f2f3f5; }
+  </style>
+</head>
+<body class="p-4 max-w-3xl mx-auto">
+  <header class="mb-4 flex justify-between items-center">
+    <div>
+      <h1 class="text-2xl font-bold tracking-tight">🏠 Family Hub</h1>
+      <p class="text-sm text-gray-500">Shared tasks & backlog for CJ and Bri — realtime via Firebase.</p>
+    </div>
+    <button id="installBtn" class="hidden bg-blue-600 text-white px-3 py-1 rounded">Install</button>
+  </header>
+
+  <!-- Filters -->
+  <div class="mb-4 flex gap-2">
+    <button data-filter="all"  class="filter-btn ghost-btn">All</button>
+    <button data-filter="CJ"   class="filter-btn ghost-btn"><span class="badge badge-cj">CJ</span></button>
+    <button data-filter="Bri"  class="filter-btn ghost-btn"><span class="badge badge-bri">Bri</span></button>
+    <button data-filter="Both" class="filter-btn ghost-btn"><span class="badge badge-both">Both</span></button>
+  </div>
+
+  <!-- Tasks -->
+  <section class="card mb-4">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-lg font-semibold">Tasks</h2>
+      <span id="tasksCount" class="text-xs text-gray-500"></span>
+    </div>
+    <form id="taskForm" class="grid grid-cols-1 sm:grid-cols-5 gap-2 mb-3">
+      <input type="text" id="taskTitle" placeholder="Task title" class="sm:col-span-3 border rounded px-2 py-2" required>
+      <select id="taskUser" class="border rounded px-2 py-2">
+        <option value="CJ">CJ</option>
+        <option value="Bri">Bri</option>
+        <option value="Both">Both</option>
+      </select>
+      <button class="bg-blue-600 text-white rounded px-3 py-2">Add</button>
+    </form>
+    <ul id="taskList" class="space-y-2"></ul>
+  </section>
+
+  <!-- Backlog -->
+  <section class="card mb-4">
+    <div class="flex justify-between items-center mb-2">
+      <h2 class="text-lg font-semibold">Backlog (hidden dump)</h2>
+      <button id="toggleBacklog" class="text-sm text-blue-600">Show</button>
+    </div>
+    <form id="backlogForm" class="grid grid-cols-1 sm:grid-cols-5 gap-2 mb-3 hidden">
+      <input type="text" id="backlogTitle" placeholder="Backlog item" class="sm:col-span-3 border rounded px-2 py-2">
+      <select id="backlogUser" class="border rounded px-2 py-2">
+        <option value="CJ">CJ</option>
+        <option value="Bri">Bri</option>
+        <option value="Both">Both</option>
+      </select>
+      <button class="bg-blue-600 text-white rounded px-3 py-2">Add</button>
+    </form>
+    <ul id="backlogList" class="space-y-2 hidden"></ul>
+  </section>
+
+  <footer class="text-xs text-gray-500 mt-6 text-center">
+    <p>Tip: Add this site to your Home Screen for an app-like experience. Data syncs instantly via Firebase.</p>
+  </footer>
+
+  <!-- Firebase compat (v10.x) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+
+  <script>
+  // --- Firebase Config (CJ's project) ---
+  const firebaseConfig = {
+    apiKey: "AIzaSyBXVs-RwqcbLM672Tx5QWu48v9nPCvLXDY",
+    authDomain: "family-hub-4b2f3.firebaseapp.com",
+    databaseURL: "https://family-hub-4b2f3-default-rtdb.firebaseio.com",
+    projectId: "family-hub-4b2f3",
+    storageBucket: "family-hub-4b2f3.firebasestorage.app",
+    messagingSenderId: "479792531016",
+    appId: "1:479792531016:web:c7afa4e48a6de7616bfa7d",
+  };
+  firebase.initializeApp(firebaseConfig);
+  const db = firebase.database();
+
+  // --- State ---
+  let filterUser = 'all';
+  const taskList   = document.getElementById('taskList');
+  const backlogList= document.getElementById('backlogList');
+  const tasksCount = document.getElementById('tasksCount');
+
+  function badgeCls(user) {
+    return user==='CJ' ? 'badge badge-cj' : user==='Bri' ? 'badge badge-bri' : 'badge badge-both';
+  }
+
+  function renderList(listEl, data, kind) {
+    const entries = Object.entries(data || {});
+    listEl.innerHTML = '';
+    let open = 0;
+    for (const [id, item] of entries) {
+      if (filterUser !== 'all' && item.user !== filterUser) continue;
+      const li = document.createElement('li');
+      li.className = "flex items-center justify-between border rounded px-3 py-2";
+      li.innerHTML = `
+        <div class="flex items-center gap-3">
+          <input type="checkbox" ${item.done?'checked':''} data-id="${id}" data-kind="${kind}" class="done-toggle">
+          <span class="${item.done?'line-through text-gray-400':''}">${item.title || ''}</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="${badgeCls(item.user)}">${item.user}</span>
+          <button class="ghost-btn text-gray-500" data-del="${id}" data-kind="${kind}" title="Delete">✕</button>
+        </div>`;
+      if (!item.done) open++;
+      listEl.appendChild(li);
+    }
+    if (kind==='tasks') tasksCount.textContent = `${open} open`;
+  }
+
+  // Realtime listeners
+  db.ref('tasks').on('value', s => renderList(taskList, s.val(), 'tasks'));
+  db.ref('backlog').on('value', s => renderList(backlogList, s.val(), 'backlog'));
+
+  // Adders
+  document.getElementById('taskForm').addEventListener('submit', e => {
+    e.preventDefault();
+    const title = document.getElementById('taskTitle').value.trim();
+    const user  = document.getElementById('taskUser').value;
+    if (!title) return;
+    const id = db.ref().child('tasks').push().key;
+    db.ref('tasks/'+id).set({ title, user, done:false });
+    e.target.reset();
+  });
+  document.getElementById('backlogForm').addEventListener('submit', e => {
+    e.preventDefault();
+    const title = document.getElementById('backlogTitle').value.trim();
+    const user  = document.getElementById('backlogUser').value;
+    if (!title) return;
+    const id = db.ref().child('backlog').push().key;
+    db.ref('backlog/'+id).set({ title, user, done:false });
+    e.target.reset();
+  });
+
+  // Toggle done & delete
+  document.addEventListener('click', (e)=>{
+    const delId = e.target.getAttribute('data-del');
+    const kind  = e.target.getAttribute('data-kind');
+    if (delId && kind) { db.ref(kind+'/'+delId).remove(); }
+
+    if (e.target.classList.contains('done-toggle')) {
+      const id = e.target.getAttribute('data-id');
+      const k  = e.target.getAttribute('data-kind');
+      db.ref(k+'/'+id+'/done').set(e.target.checked);
+    }
+  });
+
+  // Filters
+  document.querySelectorAll('.filter-btn').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      filterUser = b.dataset.filter;
+      // Re-render using cached data (pull once)
+      db.ref('tasks').once('value', s => renderList(taskList, s.val(), 'tasks'));
+      db.ref('backlog').once('value', s => renderList(backlogList, s.val(), 'backlog'));
+    });
+  });
+
+  // Backlog toggle (hidden by default)
+  const toggleBtn = document.getElementById('toggleBacklog');
+  const bForm = document.getElementById('backlogForm');
+  toggleBtn.addEventListener('click', ()=>{
+    const hidden = backlogList.classList.toggle('hidden');
+    bForm.classList.toggle('hidden');
+    toggleBtn.textContent = hidden ? 'Show' : 'Hide';
+  });
+
+  // PWA install prompt
+  let deferredPrompt;
+  const installBtn = document.getElementById('installBtn');
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredPrompt = e;
+    installBtn.classList.remove('hidden');
+  });
+  installBtn.addEventListener('click', async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    await deferredPrompt.userChoice;
+    deferredPrompt = null;
+    installBtn.classList.add('hidden');
+  });
+
+  // Register SW
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('service-worker.js');
+  }
+  </script>
+</body>
+</html>
